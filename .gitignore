@@ -1,0 +1,19 @@
+node_modules/
+.bridge-state/
+.verification/
+/bridge.config.json
+/bridge-compat-handoff/
+# Local secrets and tool metadata
+.env
+.env.*
+!.env.example
+.aws/
+.codex/
+.agents/
+*.configure.lock
+*.json.bak.*
+*.json.tmp.*
+*.tgz
+*.log
+.DS_Store
+Thumbs.db

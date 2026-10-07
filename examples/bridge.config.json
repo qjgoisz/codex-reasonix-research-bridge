@@ -1,0 +1,10 @@
+{
+  "schema": 2,
+  "backend": "studio",
+  "provider": null,
+  "model": null,
+  "reasoningEffort": null,
+  "exposeModelChoice": false,
+  "transport": "direct",
+  "approvalMode": "ask"
+}

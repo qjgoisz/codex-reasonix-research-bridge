@@ -1,0 +1,33 @@
+{
+  "name": "codex-reasonix-bridge",
+  "version": "0.1.0",
+  "license": "GPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "description": "Persistent MCP research delegation bridge for Reasonix Studio HTTP/SSE",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "reasonix-bridge": "./src/cli.mjs"
+  },
+  "scripts": {
+    "test": "node test/run.mjs",
+    "test:unit": "node --test test/refactor.test.mjs test/config-platform-reasonix.test.mjs test/configure-bridge.test.mjs test/studio.test.mjs",
+    "configure": "node scripts/configure-bridge.mjs",
+    "check": "node scripts/check.mjs",
+    "probe": "node scripts/probe.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "files": [
+    "src",
+    "scripts",
+    "test",
+    "examples",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "NOTICE.md",
+    "AGENTS.md"
+  ]
+}
