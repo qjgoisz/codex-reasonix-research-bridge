@@ -17,7 +17,8 @@
     "configure": "node scripts/configure-bridge.mjs",
     "check": "node scripts/check.mjs",
     "probe": "node scripts/probe.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "package:release": "node scripts/package-release.mjs"
   },
   "files": [
     "src",
