@@ -393,16 +393,19 @@ export class AcpClient {
 
   async observeExit(pid, graceMs = this.#emergencyGraceMs) {
     if (!Number.isSafeInteger(pid) || pid <= 0) return true;
+    this.#observeExitError = null;
     const deadline = Date.now() + graceMs;
     for (;;) {
       try {
         process.kill(processTarget(pid), 0); // 信号 0 = 只探测存在性，不投递
       } catch (error) {
 
-        if (error?.code === 'ESRCH') return true;
+        if (error?.code === 'ESRCH') { this.#observeExitError = null; return true; }
 
         this.#observeExitError = { code: error?.code ?? null, message: error?.message ?? String(error) };
-        return false;
+        // Darwin can return EPERM while a killed group is being reaped. Retry
+        // within the existing budget; EPERM itself never proves termination.
+        if (error?.code !== 'EPERM') return false;
       }
       if (Date.now() >= deadline) return false;
       await new Promise(resolve => setTimeout(resolve, 10));
@@ -420,25 +423,23 @@ export class AcpClient {
     if (this.#closed) return { code: this.#child.exitCode, signal: this.#child.signalCode, escalated: false, observed: true };
 
     try {
-      await new Promise(resolve => {
-        this.#child.stdin.end(() => {
-          this.#child.stdin.destroy();
-          resolve();
-        });
-      });
+      // A Windows pipe's end callback can wait indefinitely when the peer does
+      // not read stdin. Request EOF, then bound the wait on actual child exit.
+      this.#child.stdin.end();
     } catch {
       this.#child.stdin.destroy();
     }
-    const closed = new Promise(resolve => {
-      const timer = setTimeout(() => resolve('timeout'), 200);
-      this.#child.once('close', code => { clearTimeout(timer); resolve(code); });
-    });
-    const raced = await closed;
-    if (raced !== 'timeout') {
+    let timer;
+    let outcome;
+    try {
+      outcome = await Promise.race([this.exit, new Promise(resolve => { timer = setTimeout(() => resolve(null), 200); })]);
+    } finally { clearTimeout(timer); }
+    if (outcome !== null) {
       this.#closed = true;
       this.#fail('client_shutdown');
       return { code: this.#child.exitCode, signal: this.#child.signalCode, escalated: false, observed: true };
     }
+    this.#child.stdin.destroy();
     return finish();
   }
 }

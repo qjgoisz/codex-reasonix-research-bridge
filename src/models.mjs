@@ -1,7 +1,7 @@
 
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 export const cataloguePublished = summary => (summary?.model?.choices ?? []).length > 0;
 
@@ -167,7 +167,7 @@ export class CatalogueCache {
   }
 
   write({ reasonixHome, summary, at = new Date().toISOString() }) {
-    mkdirSync(this.#path.replace(/\/[^/]+$/, ''), { recursive: true, mode: 0o700 });
+    mkdirSync(dirname(this.#path), { recursive: true, mode: 0o700 });
     writeFileSync(this.#path, `${JSON.stringify({
       schema: CATALOGUE_SCHEMA, at, reasonixHome, summary,
     }, null, 2)}\n`, { mode: 0o600 });

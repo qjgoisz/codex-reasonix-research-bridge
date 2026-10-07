@@ -1,5 +1,7 @@
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
+import { once } from 'node:events';
+import { processTarget } from '../src/platform/process.mjs';
 
 import { createSuite } from './harness.mjs';
 import { AcpClient } from '../src/acp-client.mjs';
@@ -11,6 +13,18 @@ import { Bridge } from '../src/orchestration.mjs';
 import { mkdirSync } from 'node:fs';
 
 export const suite = createSuite('ACP 客户端（对 fake agent，离线）');
+
+// These fixtures have no descendants. Use native PID termination on Windows;
+// negative PIDs address detached process groups only on POSIX.
+function killIdleFixture(child) {
+  if (!Number.isSafeInteger(child?.pid)) return;
+  try {
+    if (process.platform === 'win32') child.kill('SIGKILL');
+    else process.kill(-child.pid, 'SIGKILL');
+  } catch (error) {
+    if (error.code !== 'ESRCH') throw error;
+  }
+}
 
 const start = (ctx, { scenario = 'normal', env = {}, ...options } = {}) => {
   const stateFile = join(ctx.tempDir(), 'state.json');
@@ -203,7 +217,7 @@ suite.test('输入流被污染时立刻失败，不把日志当协议', async ct
   });
   const error = await ctx.rejects(client.initialize(), failure => failure.code === 'invalid_frame');
   ctx.equal(error.code, 'invalid_frame');
-  await client.shutdown();
+  ctx.equal((await client.shutdown()).observed, true, '污染协议后的不读 stdin worker 也必须被确认回收');
 });
 
 suite.test('prompt 超时归类为结果未知，而不是失败', async ctx => {
@@ -234,6 +248,29 @@ suite.test('shutdown 有界终止 worker 并观测退出', async ctx => {
   const result = await client.shutdown();
   ctx.equal(result.observed, true);
   ctx.equal(client.pid !== null, true);
+});
+
+suite.test('stdin EOF 不完成时 shutdown 仍有界终止并独立确认退出', async ctx => {
+  const client = new AcpClient({ command: process.execPath,
+    args: ['-e', 'setInterval(() => {}, 1000)'], cwd: ctx.tempDir(), env: process.env });
+  const child = client.childForDiagnostics, stdin = child.stdin, originalEnd = stdin.end;
+  let timer;
+  try {
+    await once(child, 'spawn');
+    // Model a pipe whose EOF never completes, without depending on host timing.
+    stdin.end = () => stdin;
+    const result = await Promise.race([client.shutdown(), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('shutdown remained blocked on stdin EOF')), 8000);
+    })]);
+    ctx.equal(result.observed, true, '必须观测 child close');
+    let alive = true;
+    try { process.kill(child.pid, 0); } catch (error) { if (error.code === 'ESRCH') alive = false; else throw error; }
+    ctx.equal(alive, false, '独立 PID 探测必须确认 worker 已退出');
+  } finally {
+    clearTimeout(timer); stdin.end = originalEnd;
+    killIdleFixture(child);
+    await client.shutdown().catch(() => {});
+  }
 });
 
 suite.test('传输构建器：默认直连，posix-pipes 需显式选择且经 bash 包装', ctx => {
@@ -382,6 +419,7 @@ suite.test('紧急终止必须真的结束 worker 进程组，并独立观测到
       command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'],
       env: { ...process.env }, transport: 'direct', cwd: process.cwd(), emergencyGraceMs: 300,
     });
+    await once(real.childForDiagnostics, 'spawn');
     // 等它真的起来
     const upDeadline = Date.now() + 3000;
     while (!Number.isSafeInteger(realPid) && Date.now() < upDeadline) {
@@ -402,7 +440,7 @@ suite.test('紧急终止必须真的结束 worker 进程组，并独立观测到
     ctx.equal(aliveReal(), false, `worker 进程组必须真的消失（pid ${realPid} 仍存活）`);
   } finally {
     // **无论断言成功、失败还是抛异常，都走同一条清理路径**（Y8）。
-    try { if (Number.isSafeInteger(realPid)) process.kill(-realPid, 'SIGKILL'); } catch { /* 已消失 */ }
+    killIdleFixture(real?.childForDiagnostics);
     try { await real?.shutdown(); } catch { /* 已经死在上面 */ }
     // 有界等待它真的关闭，避免 runner 被残留句柄卡住
     const closeDeadline = Date.now() + 1000;
@@ -557,17 +595,18 @@ suite.test('探测失败（EPERM）不得被记成「已确认终止」（Y4）'
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
     detached: true, stdio: ['ignore', 'ignore', 'ignore'],
   });
-  await new Promise(resolve => setTimeout(resolve, 120));
   const pid = child.pid;
-  ctx.assert(Number.isSafeInteger(pid), `子进程应当有 pid：${pid}`);
-
-  const client = new AcpClient({
-    command: process.execPath,
-    args: ['-e', 'setInterval(() => {}, 1000)'],
-    env: { ...process.env }, transport: 'direct', cwd: process.cwd(), emergencyGraceMs: 60,
-  });
+  let client = null;
   const realKill = process.kill;
   try {
+    await once(child, 'spawn');
+    ctx.assert(Number.isSafeInteger(pid), `子进程应当有 pid：${pid}`);
+    client = new AcpClient({
+      command: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+      env: { ...process.env }, transport: 'direct', cwd: process.cwd(), emergencyGraceMs: 60,
+    });
+    await once(client.childForDiagnostics, 'spawn');
     // ① EPERM：探测失败 ≠ 已消失
     process.kill = () => { const error = new Error('need privilege'); error.code = 'EPERM'; throw error; };
     const withEperm = await client.observeExit(pid, 40);
@@ -582,15 +621,28 @@ suite.test('探测失败（EPERM）不得被记成「已确认终止」（Y4）'
       '真实仍活着的进程组必须报"未确认"');
 
     // ③ ES RCH：真的消失之后必须 true
-    try { realKill(-pid, 'SIGKILL'); } catch { /* 可能已退出 */ }
-    await new Promise(resolve => setTimeout(resolve, 150));
+    killIdleFixture(child);
+    const deadline = Date.now() + 3000;
+    while (aliveCheck() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
     ctx.equal(aliveCheck(), false, '前置条件：SIGKILL 之后子进程必须已消失');
     ctx.equal(await client.observeExit(pid, 200), true,
       '进程组真的不存在时才报"已终止"');
+
+    // Retry transient EPERM, but persistent EPERM above must still be false.
+    let probes = 0;
+    process.kill = (target, signal) => {
+      if (target === processTarget(pid) && signal === 0 && probes++ === 0) {
+        throw Object.assign(new Error('group is being reaped'), { code: 'EPERM' });
+      }
+      return realKill(target, signal);
+    };
+    ctx.equal(await client.observeExit(pid, 200), true, '短暂 EPERM 后必须重新探测到 ESRCH');
+    ctx.assert(probes >= 2, '不能把第一次 EPERM 直接当成已退出');
+    process.kill = realKill;
   } finally {
     process.kill = realKill;
-    try { realKill(-pid, 'SIGKILL'); } catch { /* 已清理 */ }
-    await client.shutdown().catch(() => {});
+    killIdleFixture(child);
+    await client?.shutdown().catch(() => {});
   }
 });
 

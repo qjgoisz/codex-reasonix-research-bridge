@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { createSuite } from './harness.mjs';
 import {
@@ -138,7 +139,8 @@ suite.test('摘要可以往返成 configOptions，缓存不丢信息', ctx => {
 });
 
 suite.test('目录缓存带时间戳、可判新旧、损坏时视为没有', ctx => {
-  const root = ctx.tempDir('catalogue-');
+  // The cache must also create an absent state directory using native paths.
+  const root = join(ctx.tempDir('catalogue-'), 'nested', 'state');
   const cache = new CatalogueCache(root);
   ctx.equal(cache.read(), null, '未写过就是没有');
 
