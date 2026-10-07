@@ -10,9 +10,11 @@ if (pkg.version !== BRIDGE_VERSION) throw new Error('package.json and BRIDGE_VER
 const tag = process.env.RELEASE_TAG;
 if (tag && tag !== `v${pkg.version}`) throw new Error('Release tag must exactly match v<package.json version>.');
 const dist = join(root, 'dist'); mkdirSync(dist, { recursive: true });
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const npmCli = process.platform === 'win32' ? process.env.npm_execpath : null;
+if (process.platform === 'win32' && !npmCli?.endsWith('.js')) throw new Error('On Windows run this through npm run package:release.');
+const npm = npmCli ? process.execPath : 'npm';
 function pack(extra) {
-  const result = spawnSync(npm, ['pack', '--json', ...extra], { cwd: root, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  const result = spawnSync(npm, [...(npmCli ? [npmCli] : []), 'pack', '--json', ...extra], { cwd: root, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
   if (result.error || result.status !== 0) throw new Error('npm pack failed; check npm and its cache directory permissions.');
   const doc = JSON.parse(result.stdout);
   const entries = Array.isArray(doc) ? doc : Object.values(doc);

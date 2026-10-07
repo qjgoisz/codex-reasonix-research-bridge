@@ -1,13 +1,14 @@
 # CI 与发布
 
 `.github/workflows/ci.yml` 在 push、pull request 和手动触发时运行。
-目前验证 Linux、Node.js 24 与 Python 3.13；这不代表 Windows/macOS 原生验收。
+检查矩阵包含 Ubuntu、macOS 和 Windows，均使用 Node.js 24 与 Python 3.13。
+矩阵验证本机 IPC、假后端与打包，不代表对应平台的真实 Studio 验收。
 
 检查顺序：语法、188 项回归、单元与多客户端进程测试、离线 smoke、源码打包。
 仓库没有外部运行时/测试依赖，不执行 npm install，也不需要 lockfile。
 CI 不启动真实 Reasonix、不调用模型、不使用模型密钥。
 Actions 固定到完整 commit SHA，普通检查只有 contents:read 权限。
-成功后可在该次 Actions 运行页面下载 source-package，保留 14 天。
+成功后可在该次 Actions 运行页面下载 source-package-Linux、source-package-macOS 或 source-package-Windows，保留 14 天。
 
 本地生成相同格式的源码包：
 
@@ -23,7 +24,7 @@ npm run package:release
 
 1. 确认 `package.json` 的 version 与 `src/version.mjs` 的 BRIDGE_VERSION 一致，提交到 GitHub。
 2. 创建并推送同版本标签，例如当前版本为 0.1.0 时使用 `v0.1.0`。
-3. CI 全部通过后，release job 使用内置 GITHUB_TOKEN 创建草稿 Release，附源码包与 SHA-256 校验文件。
+3. 三个系统的 CI 全部通过后，Linux release job 使用内置 GITHUB_TOKEN 创建草稿 Release，附源码包与 SHA-256 校验文件。
 4. 在 GitHub 核对草稿与附件，再点击发布。
 
 标签必须严格等于 `v<package.json version>`；不一致会阻止发布。

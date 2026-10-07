@@ -1,21 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { contract, FAKE_AGENT, until, wait } from './fixtures.mjs';
 const CLI = join(import.meta.dirname, '..', 'src', 'cli.mjs');
-const supported = process.platform !== 'win32';
+const supported = true;
+const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 function fixture(t, env = {}) {
   const root = mkdtempSync(join(tmpdir(), 'reasonix-shared-test-'));
   const state = join(root, 'state'), workspace = join(root, 'work'); mkdirSync(workspace);
   const clients = [];
   t.after(async () => {
     for (const c of clients) c.child.stdin.end();
-    for (const c of clients) if (c.child.exitCode === null && c.child.signalCode === null) c.child.kill('SIGTERM');
-    try { const d = JSON.parse(readFileSync(join(state, 'daemon.json'))); process.kill(d.pid, 'SIGTERM'); } catch {}
-    await until(() => !existsSync(join(state, 'bridge.lock')), { timeoutMs: 10000 }).catch(() => {});
+    await until(() => {
+      if (!existsSync(join(state, 'bridge.lock'))) return true;
+      try { return !alive(JSON.parse(readFileSync(join(state, 'bridge.lock'))).pid); } catch { return false; }
+    }, { timeoutMs: 10000 }).catch(() => {});
+    // Only this fixture's processes may be force-cleaned after a failed assertion.
+    const pids = clients.map(c => c.child.pid);
+    for (const file of [join(state, 'daemon.json'), join(root, 'fake.json')]) {
+      try { pids.push(JSON.parse(readFileSync(file)).pid); } catch {}
+    }
+    for (const pid of pids.filter(Number.isSafeInteger)) if (alive(pid)) {
+      if (process.platform === 'win32') { try { execFileSync('taskkill.exe', ['/PID',String(pid),'/T','/F'],{windowsHide:true,stdio:'ignore'}); } catch {} }
+      else { try { process.kill(pid,'SIGKILL'); } catch {} }
+    }
     rmSync(root, { recursive: true, force: true });
   });
   const start = (extras = []) => {
@@ -123,7 +134,13 @@ test('daemon failure closes client connections and does not replay a submitted t
   await until(()=>{try{return JSON.parse(readFileSync(join(f.root,'fake.json'))).prompts===1;}catch{return false;}});
   process.kill(lock(f.state).pid,'SIGTERM');
   assert.notEqual(await a.closed,0);assert.notEqual(await b.closed,0);
-  await until(()=>!existsSync(join(f.state,'bridge.lock')),{timeoutMs:10000});
+  if (process.platform !== 'win32') await until(()=>!existsSync(join(f.state,'bridge.lock')),{timeoutMs:10000});
+  if (process.platform === 'win32') {
+    // Windows terminates SIGTERM targets abruptly: no POSIX cleanup handler.
+    assert.equal(JSON.parse(readFileSync(join(f.root,'fake.json'))).prompts,1);
+    const c=f.start();await assert.rejects(init(c),/残留或损坏/);await c.closed;
+    return;
+  }
   const c=f.start();await init(c);
   const view=await c.call('reasonix_status',{id:'interrupted'});
   assert.ok(['cancelled','unknown'].includes(view.status));assert.equal(view.attempts,1);

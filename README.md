@@ -8,6 +8,8 @@ Codex 规划与验收；Reasonix 执行；桥保存任务、会话、审批、�
 默认连接安装包里的 `reasonix-studio-host`，通过受认证的 loopback HTTP + SSE 工作。
 桥启动自己管理的后端实例，沿用 Studio 的 Reasonix home、登录及模型配置；不会接管 GUI 的活跃聊天。
 安装包无需包含 `reasonix` CLI。Node.js ≥24，零外部依赖。
+共享后台支持 Linux/macOS Unix socket 与 Windows 命名管道；参见[平台配置示例](docs/usage.md#平台配置示例)。
+三平台离线 CI 使用假后端；真实 Windows/macOS Studio 仍待验收。
 
 ```sh
 node scripts/configure-bridge.mjs --desktop-root '/opt/Reasonix Studio'

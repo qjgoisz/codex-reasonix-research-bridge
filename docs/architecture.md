@@ -1,7 +1,7 @@
 # 架构
 
 ```text
-Codex 聊天 → MCP stdio 客户端 → 本机 socket → 共享 Bridge → StudioClient → 自有 Studio host
+Codex 聊天 → MCP stdio 客户端 → 本机 IPC → 共享 Bridge → StudioClient → 自有 Studio host
                          ↓               HTTP + SSE
                   独立 JSON 状态目录
 ```
@@ -14,10 +14,11 @@ Codex 聊天 → MCP stdio 客户端 → 本机 socket → 共享 Bridge → Stu
 
 默认 `serve` 只转发协议，不持状态锁。它发现或启动独立后台；后台通过原有 `bridge.lock` 独占选举并持有 Store、Bridge、任务队列与审批状态。
 并发启动的候选进程只有一个能取得锁，其余退出，客户端连接胜出的后台。
-每条 socket 连接有自己的 MCP 初始化状态和请求 ID 空间；客户端不自动重放任何已转发请求。
+每条 IPC 连接有自己的 MCP 初始化状态和请求 ID 空间；客户端不自动重放任何已转发请求。
 配置指纹不匹配时拒绝连接，不允许某个聊天偷偷改变其他聊天的模型或策略。
 
-Linux/POSIX 使用临时 0700 目录中的 0600 Unix socket，发现文件 `daemon.json` 为 0600，核对当前用户、状态锁 PID、协议与配置指纹。
+Linux/macOS 使用临时 0700 目录中的 0600 Unix socket，发现文件 `daemon.json` 为 0600，核对当前用户、状态锁 PID、协议与配置指纹。
+Windows 使用带 256 位随机名称的本机命名管道，并核对状态锁 PID、协议与配置指纹；不依赖 Unix socket 或文件 chmod。Windows 的状态目录隐私由文件系统 ACL 保护，请放在当前用户的私有目录中。
 不监听 TCP，不保存 Reasonix 握手 token。原有锁由后台持有，活动锁、损坏锁和残留锁均不由客户端删除。
 旧版独占服务还在运行时，共享客户端明确报错，需让旧服务正常退出再切换。
 
@@ -26,7 +27,8 @@ Linux/POSIX 使用临时 0700 目录中的 0600 Unix socket，发现文件 `daem
 后台异常退出时客户端收到连接错误，不会自动重发；重新连接后应核对任务状态。
 
 `serve --private-stdio` 保留独占模式，用于隔离诊断与专用生命周期测试，必须使用独立状态目录。
-共享后台当前需要 POSIX socket；Windows 默认共享模式明确拒绝，须使用独占模式和每客户端独立状态目录。macOS 尚未原生验收。
+三平台使用同一后台选举与转发逻辑。macOS 临时目录路径过长时使用 /tmp 下的私有短目录。
+IPC 协议已升级为 2；升级时让全部旧客户端正常退出，再重新加载。真实 Windows/macOS Studio 尚未原生验收。
 CLI 的一次性写操作不会绕过后台锁；后台活动时请通过 MCP 工具执行写操作。
 
 ## Studio 接口

@@ -242,7 +242,7 @@ suite.test('传输构建器：默认直连，posix-pipes 需显式选择且经 b
   ctx.equal(direct.command, 'reasonix');
   ctx.deepEqual(direct.args, ['--profile', 'acp']);
 
-  const piped = buildLaunch({ command: 'reasonix', args: ['--profile', 'acp'], transport: 'posix-pipes' });
+  const piped = buildLaunch({ command: 'reasonix', args: ['--profile', 'acp'], transport: 'posix-pipes' }, 'linux');
   ctx.equal(piped.command, '/bin/bash');
   ctx.equal(piped.args[0], '--noprofile');
   ctx.assert(piped.args.includes('reasonix'), 'argv 必须逐项传递，不拼接 shell 文本');

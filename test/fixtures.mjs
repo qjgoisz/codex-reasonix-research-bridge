@@ -1,5 +1,6 @@
 /** Shared fixtures for the bridge test suite. */
 
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -8,7 +9,7 @@ export const FAKE_AGENT = fileURLToPath(new URL('./fake-acp-agent.mjs', import.m
 
 /** A valid contract; override any field to build the invalid cases. */
 export function contract(overrides = {}) {
-  const workspace = overrides.workspace ?? '/tmp/bridge-test-workspace';
+  const workspace = overrides.workspace ?? join(tmpdir(), 'bridge-test-workspace');
   return {
     id: 'task-001',
     objective: '核对有效方程中 m 的二阶系数',

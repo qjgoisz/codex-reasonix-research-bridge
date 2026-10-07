@@ -1,3 +1,4 @@
+import { tmpdir as nativeTempDir } from 'node:os';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -74,7 +75,7 @@ suite.test('前缀稳定性：只有追加才算保持（提供方按整段前�
 });
 
 suite.test('renderFollowUp 是追加式的：原任务文本逐字成为前缀（缓存前缀不失配）', ctx => {
-  const base = contract({ id: 'u-prefix', workspace: '/tmp/ws', permissions: { writePaths: ['/tmp/ws'] } });
+  const base = contract({ id: 'u-prefix', workspace: join(nativeTempDir(), 'ws'), permissions: { writePaths: [join(nativeTempDir(), 'ws')] } });
   const first = renderPrompt(base);
 
   // 同一契约两次渲染必须逐字节一致，否则"追加"都无从谈起
@@ -91,7 +92,7 @@ suite.test('renderFollowUp 是追加式的：原任务文本逐字成为前缀�
 });
 
 suite.test('续跑追加不会把答案混进原任务正文（可读性）', ctx => {
-  const base = contract({ id: 'u-clean', workspace: '/tmp/ws', permissions: { writePaths: ['/tmp/ws'] } });
+  const base = contract({ id: 'u-clean', workspace: join(nativeTempDir(), 'ws'), permissions: { writePaths: [join(nativeTempDir(), 'ws')] } });
   const followUp = renderFollowUp({ ...base, clarification: { question: 'q', answer: null } }, '答案');
   const marker = followUp.indexOf('## 澄清答复');
   ctx.assert(marker > 0, '必须有明确的分隔标记');

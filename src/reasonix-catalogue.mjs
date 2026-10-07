@@ -38,9 +38,14 @@ function endpoint(value) {
 }
 export function readReasonixCatalogue({ home, configPath, env = process.env } = {}) {
   const path = configPath ? resolve(configPath) : join(home ?? env.REASONIX_HOME ?? DEFAULT_REASONIX_HOME, 'config.toml');
-  const run = spawnSync('python3', ['-I', '-c', projection, path], {
-    encoding: 'utf8', timeout: 5000, maxBuffer: 2 * 1024 * 1024, windowsHide: true,
-  });
+  const launchers = process.platform === 'win32' ? [['python', []], ['py', ['-3']], ['python3', []]] : [['python3', []]];
+  let run;
+  for (const [command, prefix] of launchers) {
+    run = spawnSync(command, [...prefix, '-I', '-c', projection, path], {
+      encoding: 'utf8', timeout: 5000, maxBuffer: 2 * 1024 * 1024, windowsHide: true, env,
+    });
+    if (!run.error && run.status === 0 && !run.stdout.includes('tomllib_unavailable')) break;
+  }
   if (run.error || run.status !== 0) return { path, providers: [], defaultModel: null, error: 'python_unavailable' };
   try {
     const doc = JSON.parse(run.stdout);

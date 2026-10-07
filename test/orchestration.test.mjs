@@ -1,3 +1,4 @@
+import { tmpdir as nativeTempDir } from 'node:os';
 import { capabilityFingerprint, sessionKeyOf } from '../src/contract.mjs';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -383,10 +384,10 @@ suite.test('更新收集器只把已提交正文算作交付物', ctx => {
 });
 
 suite.test('worker 规格：Reasonix ACP 的 argv 与 home 注入', ctx => {
-  const spec = createWorkerSpec({ workspace: '/tmp/ws', command: 'reasonix', reasonixHome: '/tmp/h' });
+  const spec = createWorkerSpec({ workspace: join(nativeTempDir(), 'ws'), command: 'reasonix', reasonixHome: join(nativeTempDir(), 'h') });
   ctx.deepEqual(spec.args, ['acp']);
-  ctx.equal(spec.env.REASONIX_HOME, '/tmp/h');
-  const explicit = createWorkerSpec({ workspace: '/tmp/ws', command: process.execPath, args: ['/tmp/fake.mjs'] });
+  ctx.equal(spec.env.REASONIX_HOME, join(nativeTempDir(), 'h'));
+  const explicit = createWorkerSpec({ workspace: join(nativeTempDir(), 'ws'), command: process.execPath, args: ['/tmp/fake.mjs'] });
   ctx.deepEqual(explicit.args, ['/tmp/fake.mjs']);
 });
 suite.test('preflight 后端不存在时给出安装提示', ctx => {
@@ -723,7 +724,7 @@ suite.test('而换模型仍然必须换会话（判据的另一半）', async ct
 });
 
 suite.test('导出的 sessionKeyOf 与实际使用的键是同一把', ctx => {
-  const base = contract({ id: 'k5', workspace: '/tmp/ws', permissions: { writePaths: ['/tmp/ws'] } });
+  const base = contract({ id: 'k5', workspace: join(nativeTempDir(), 'ws'), permissions: { writePaths: [join(nativeTempDir(), 'ws')] } });
   // 两个入口都必须用同一个 capabilityFingerprint，否则"导出的键"会与"实际用的键"对不上
   const policy = { model: 'deepseek-flash', provider: 'deepseek-official', reasoningEffort: 'high' };
   const keyed = sessionKeyOf(base, 0, policy, { provider: 'deepseek-official', modelId: 'deepseek-flash' });

@@ -86,7 +86,7 @@ startup_timeout_sec = 30
 tool_timeout_sec = 150
 ```
 
-首次从旧版升级：关闭使用旧桥的聊天/MCP 连接，让独占进程正常退出，再重新加载 MCP。
+首次从旧版升级（包括 IPC 协议 1 → 2）：关闭使用旧桥的聊天/MCP 连接，让独占进程正常退出，再重新加载 MCP。
 不要删除活动 `bridge.lock`；新客户端遇到旧版活动进程会明确拒绝连接。
 多个聊天需使用相同的绝对 `--config`、`--state-root` 和路由/审批配置；配置不同会拒绝共享。
 更新配置或代码后，先关闭全部旧客户端，待后台空闲退出再重连；有任务或审批时先完成、处理或显式取消。
@@ -94,7 +94,8 @@ tool_timeout_sec = 150
 关闭一个聊天不停止其他聊天或后台任务。全部客户端断开后，后台会在任务结算并空闲时自行退出。
 待审批任务可从另一个聊天通过 `reasonix_approvals` / `reasonix_approve` 处理，审批仍须有用户授权。
 重连与查询不会重发未观测到结果的任务。
-共享模式目前需要 POSIX；Windows 使用 `serve --private-stdio`，且每个客户端必须分配独立状态目录。
+Windows 默认共享模式使用命名管道；Linux/macOS 使用 Unix socket。三平台均可让多个客户端共用同一状态目录。
+Windows 请将状态目录放在当前用户私有目录，访问权限由系统 ACL 控制。
 隔离测试也可使用该选项；默认 smoke 使用独占临时服务验证 EOF 回收，多客户端用专门的进程测试验证。
 
 ## 6. MCP 工具
@@ -133,7 +134,7 @@ tool_timeout_sec = 150
 
 ## 9. 未验证与边界
 
-- 原生 Windows / macOS **未测试**；当前实现与验证以 Linux 为准。
+- 真实 Windows / macOS Studio **未测试**；共享 IPC、配置读取与打包已作平台适配，并加入三平台离线 CI。
 - CLI ACP 后端（`backend=acp`）**未实测**。
 - 本机 Studio 的测试结果见兼容性记录；没有对活跃 GUI 聊天共享作出承诺。
 
@@ -142,3 +143,21 @@ tool_timeout_sec = 150
 - 若你的 Studio 安装目录不是 `/opt/Reasonix Studio`，请据实替换 `--desktop-root`，并在 `preflight` 输出中确认解析到的入口。
 - 原生 Windows/macOS 与独立 ACP 后端仍需各自验收。
 - 需要澄清时，桥会返回 `needs_clarification`；请用 `reasonix_reply`（MCP）或 `node src/cli.mjs reply`（CLI）回答。
+
+## 平台配置示例
+
+macOS（按实际安装位置替换）：
+
+```sh
+node scripts/configure-bridge.mjs --desktop-root "/Applications/Reasonix Studio.app"
+```
+
+Windows PowerShell（按实际安装位置替换）：
+
+```powershell
+node scripts/configure-bridge.mjs --desktop-root "$env:LOCALAPPDATA\Programs\Reasonix Studio"
+```
+
+Windows 的 Codex TOML 路径可使用正斜杠，例如 `C:/Users/name/codex-reasonix-bridge/src/cli.mjs`。
+配置菜单读取会依次尝试 `python`、`py -3` 和 `python3`；需 Python 3.11 以上。
+源码包在三平台均通过 `npm run package:release` 生成。

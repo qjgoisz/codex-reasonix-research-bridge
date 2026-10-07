@@ -13,7 +13,7 @@
   },
   "scripts": {
     "test": "node test/run.mjs",
-    "test:unit": "node --test test/refactor.test.mjs test/config-platform-reasonix.test.mjs test/configure-bridge.test.mjs test/studio.test.mjs test/shared-server.test.mjs",
+    "test:unit": "node --test test/refactor.test.mjs test/config-platform-reasonix.test.mjs test/configure-bridge.test.mjs test/studio.test.mjs test/shared-server.test.mjs test/shared-endpoint.test.mjs",
     "configure": "node scripts/configure-bridge.mjs",
     "check": "node scripts/check.mjs",
     "probe": "node scripts/probe.mjs",

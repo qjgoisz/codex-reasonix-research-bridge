@@ -36,7 +36,7 @@ DSH 编写了 `test/fake-studio.mjs` 初稿和 `docs/usage.md` 初稿，主控�
 
 ## 尚未实测
 
-Windows/macOS 原生安装、独立 CLI ACP、GUI 活跃聊天共享均未验证。共享后台使用 POSIX socket，Windows 需独占模式和独立状态目录。
+Windows/macOS 原生安装、独立 CLI ACP、GUI 活跃聊天共享均未验证。共享后台已适配 Linux/macOS Unix socket 与 Windows 命名管道；三系统离线 CI 验证共享客户端和假后端，不替代真实安装包验收。
 多项并发模型任务尚未实测；真实共享后台验证了多个客户端连接、任务查询和单项模型结果回收。队列、幂等、审批及断开后续跑的多客户端进程测试使用离线 fake worker。
 Studio 原生 ask/取消的真实模型交互仅做离线协议测试；不能将这些测试描述成真实端到端验收。
 空会话没有持久 transcript，不能据空会话 probe 声称恢复通过。

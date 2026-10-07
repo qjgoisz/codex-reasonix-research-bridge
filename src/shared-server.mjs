@@ -1,17 +1,17 @@
 // One state owner; each Codex stdio process is only a socket client.
 import net from 'node:net';
 import { spawn } from 'node:child_process';
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { McpServer } from './mcp-server.mjs';
 import { Store } from './store.mjs';
 import { installShutdownHandlers } from './shutdown.mjs';
 import { DEFAULT_REASONIX_HOME } from './worker.mjs';
+import { createSharedEndpoint, validateSharedEndpoint, prepareSharedEndpoint, removeSharedEndpoint } from './platform/shared-endpoint.mjs';
 import { BRIDGE_VERSION } from './version.mjs';
 
-const PROTOCOL = 1, MAX_FRAME = 4 * 1024 * 1024;
+const PROTOCOL = 2, MAX_FRAME = 4 * 1024 * 1024;
 const descriptorPath = root => join(resolve(root), 'daemon.json');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const fail = (code, message) => Object.assign(new Error(message), { code });
@@ -24,14 +24,12 @@ export function sharedFingerprint(common) {
 function descriptor(root) {
   try {
     const path = descriptorPath(root), stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4096 || (stat.mode & 0o077)) return null;
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4096 || (process.platform !== 'win32' && (stat.mode & 0o077))) return null;
     if (process.getuid && stat.uid !== process.getuid()) return null;
     const doc = JSON.parse(readFileSync(path, 'utf8'));
     const lock = new Store(resolve(root)).lockStatus();
     if (doc.protocol !== PROTOCOL || lock.state !== 'held-live' || lock.pid !== doc.pid || typeof doc.socket !== 'string') return null;
-    const sock = lstatSync(doc.socket), parent = lstatSync(resolve(doc.socket, '..'));
-    if (!sock.isSocket() || (sock.mode & 0o077) || !parent.isDirectory() || parent.isSymbolicLink() || (parent.mode & 0o077)) return null;
-    if (process.getuid && (sock.uid !== process.getuid() || parent.uid !== process.getuid())) return null;
+    if (!validateSharedEndpoint(doc)) return null;
     return doc;
   } catch { return null; }
 }
@@ -77,7 +75,6 @@ async function connect(doc, fingerprint) {
   });
 }
 async function getConnection(common, argv) {
-  if (process.platform === 'win32') throw fail('shared_platform', '共享后台目前需要 POSIX 本机 socket；Windows 请显式使用 --private-stdio 和独立状态目录。');
   const root = resolve(common.stateRoot), fingerprint = sharedFingerprint(common);
   new Store(root).init();
   let launched = false, damagedSince = null;
@@ -99,7 +96,7 @@ async function getConnection(common, argv) {
     if (lock.state === 'stale' || lock.state === 'corrupt') throw fail('shared_stale_lock', '状态锁残留或损坏；请核对后使用 unlock --stale。共享客户端不会自动删除锁。');
     if (lock.state === 'free' && !launched) {
       const child = spawn(process.execPath, [resolve(import.meta.dirname, 'cli.mjs'), '_daemon', ...argv.slice(1)], {
-        detached: true, stdio: 'ignore', cwd: process.cwd(), env: process.env,
+        detached: true, windowsHide: true, stdio: 'ignore', cwd: process.cwd(), env: process.env,
       });
       child.on('error', () => {}); child.unref(); launched = true;
     }
@@ -132,8 +129,7 @@ export async function serveSharedClient({ common, argv, input, output }) {
 export async function runSharedDaemon({ common, openBridge, idleMs = 1000 }) {
   const { store, bridge } = openBridge(common); // exclusive election: losing candidates do nothing
   const fingerprint = sharedFingerprint(common), root = resolve(common.stateRoot);
-  const directory = mkdtempSync(join(tmpdir(), 'reasonix-bridge-socket-')); chmodSync(directory, 0o700);
-  const path = join(directory, 'mcp.sock'), sockets = new Set();
+  const endpoint = createSharedEndpoint(), path = endpoint.socket, sockets = new Set();
   let idleTimer, stopped = false, finish;
   const done = new Promise(yes => { finish = yes; });
   const rpcError = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -144,7 +140,7 @@ export async function runSharedDaemon({ common, openBridge, idleMs = 1000 }) {
       const doc = JSON.parse(readFileSync(descriptorPath(root), 'utf8'));
       if (doc.pid === process.pid) rmSync(descriptorPath(root));
     } catch { /* never remove another owner's descriptor */ }
-    rmSync(directory, { recursive: true, force: true });
+    removeSharedEndpoint(endpoint);
   };
   const lifecycle = installShutdownHandlers({ bridge: {
     shutdown: async () => { cleanupTransport(); return bridge.shutdown(); },
@@ -189,10 +185,10 @@ export async function runSharedDaemon({ common, openBridge, idleMs = 1000 }) {
     }, () => socket.destroy());
   });
   try {
-    await new Promise((yes, no) => { server.once('error', no); server.listen(path, yes); });
-    chmodSync(path, 0o600);
+    await new Promise((yes, no) => { server.once('error', no); server.listen({ path, readableAll: false, writableAll: false }, yes); });
+    prepareSharedEndpoint(endpoint);
     const temporary = descriptorPath(root) + `.tmp-${process.pid}`;
-    writeFileSync(temporary, JSON.stringify({ protocol: PROTOCOL, pid: process.pid, socket: path, fingerprint }) + '\n', { flag: 'wx', mode: 0o600 });
+    writeFileSync(temporary, JSON.stringify({ protocol: PROTOCOL, pid: process.pid, socket: path, transport: endpoint.transport, fingerprint }) + '\n', { flag: 'wx', mode: 0o600 });
     renameSync(temporary, descriptorPath(root));
     scheduleIdle(10000); // leave time for the launching client's first connection
     await done;
