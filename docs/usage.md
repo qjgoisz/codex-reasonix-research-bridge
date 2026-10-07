@@ -68,7 +68,7 @@ node scripts/configure-bridge.mjs --reasonix-config /path/to/config.toml
 
 ## 5. 以 MCP 方式接入 Codex（stdio）
 
-桥通过 stdio 提供 MCP 服务：
+桥通过 stdio 提供 MCP 服务，多个聊天自动连接同一个后台状态所有者：
 
 ```
 node src/cli.mjs serve
@@ -85,6 +85,17 @@ args = ["/absolute/path/codex-reasonix-bridge/src/cli.mjs", "serve", "--config",
 startup_timeout_sec = 30
 tool_timeout_sec = 150
 ```
+
+首次从旧版升级：关闭使用旧桥的聊天/MCP 连接，让独占进程正常退出，再重新加载 MCP。
+不要删除活动 `bridge.lock`；新客户端遇到旧版活动进程会明确拒绝连接。
+多个聊天需使用相同的绝对 `--config`、`--state-root` 和路由/审批配置；配置不同会拒绝共享。
+更新配置或代码后，先关闭全部旧客户端，待后台空闲退出再重连；有任务或审批时先完成、处理或显式取消。
+
+关闭一个聊天不停止其他聊天或后台任务。全部客户端断开后，后台会在任务结算并空闲时自行退出。
+待审批任务可从另一个聊天通过 `reasonix_approvals` / `reasonix_approve` 处理，审批仍须有用户授权。
+重连与查询不会重发未观测到结果的任务。
+共享模式目前需要 POSIX；Windows 使用 `serve --private-stdio`，且每个客户端必须分配独立状态目录。
+隔离测试也可使用该选项；默认 smoke 使用独占临时服务验证 EOF 回收，多客户端用专门的进程测试验证。
 
 ## 6. MCP 工具
 
@@ -114,7 +125,7 @@ tool_timeout_sec = 150
 ## 8. 测试命令与离线声明
 
 - `npm test` → `node test/run.mjs`。
-- `npm run test:unit` → `node --test test/refactor.test.mjs test/config-platform-reasonix.test.mjs test/configure-bridge.test.mjs test/studio.test.mjs`。
+- `npm run test:unit` → `node --test test/refactor.test.mjs test/config-platform-reasonix.test.mjs test/configure-bridge.test.mjs test/studio.test.mjs test/shared-server.test.mjs`。
 - `npm run check`、`npm run probe`、`npm run smoke`。
 - 以上 `test` / `test:unit` / `check` / `smoke` **均离线**，不调用模型。
 - `smoke --allow-model`：只有在**显式指定配置文件**、且只运行**用户已授权模型**的验收场景下才使用；默认不要放开模型调用。

@@ -2,6 +2,7 @@
 
 Codex → Reasonix Studio 的持久协作桥，由 codex-dsh-bridge 0.2.0 派生。
 Codex 规划与验收；Reasonix 执行；桥保存任务、会话、审批、结果及交付文件指纹。
+默认 `serve` 连接共享后台：多个 Codex 聊天共用一个状态所有者，避免 MCP 启动时争抢写锁。
 `completed` 仅表示执行轮次结束。
 
 默认连接安装包里的 `reasonix-studio-host`，通过受认证的 loopback HTTP + SSE 工作。

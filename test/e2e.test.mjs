@@ -24,7 +24,7 @@ function startServer(ctx, { scenario = 'normal', extraArgs = [] } = {}) {
   const workspace = ctx.tempDir('bridge-e2e-ws-');
   const child = spawn(process.execPath, [
     CLI,
-    'serve', '--backend', 'acp',
+    'serve', '--private-stdio', '--backend', 'acp',
     '--state-root', join(root, 'state'),
     '--reasonix-home', join(root, 'reasonix-home'),
     // Replace the worker with the fake ACP agent. This is the same public

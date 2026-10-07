@@ -5,6 +5,7 @@
 不要从 Reasonix 1.x 文档推断 Studio 2.x 接口；核对安装版与官方 studio 分支源码。
 
 - 保持先落盘后派发、未知结果不自动重放、历史路由快照与有界资源回收。
+- 默认 serve 客户端不持状态锁，由共享后台统一持锁；连接丢失不自动重发请求，不能删除活动锁来接管状态。
 - 只回收桥自己启动的 host；不得接管 GUI 活跃会话或删除用户研究历史。
 - 启动握手携带 token；不要把 token、Cookie 或模型凭据写入日志、配置或报告。
 - provider/model/reasoningEffort 默认沿用 Studio 配置。Studio effort endpoint 会写全局配置，不能隐式调用它。

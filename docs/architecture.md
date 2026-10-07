@@ -1,7 +1,7 @@
 # 架构
 
 ```text
-Codex → MCP stdio → Bridge → StudioClient → 自有 Studio host → Reasonix 引擎
+Codex 聊天 → MCP stdio 客户端 → 本机 socket → 共享 Bridge → StudioClient → 自有 Studio host
                          ↓               HTTP + SSE
                   独立 JSON 状态目录
 ```
@@ -9,6 +9,25 @@ Codex → MCP stdio → Bridge → StudioClient → 自有 Studio host → Reaso
 `src/orchestration.mjs` 沿用参考桥的任务、会话与工作区队列；`src/studio-client.mjs` 将 Studio HTTP 表面转换为内部会话接口。
 这不是 Studio 的 ACP 实现；worker 快照的 protocolVersion=null、agentInfo.name=reasonix-studio-http 可区分两者。
 可选独立 CLI 走原 ACP 客户端。
+
+## 多客户端与状态所有权
+
+默认 `serve` 只转发协议，不持状态锁。它发现或启动独立后台；后台通过原有 `bridge.lock` 独占选举并持有 Store、Bridge、任务队列与审批状态。
+并发启动的候选进程只有一个能取得锁，其余退出，客户端连接胜出的后台。
+每条 socket 连接有自己的 MCP 初始化状态和请求 ID 空间；客户端不自动重放任何已转发请求。
+配置指纹不匹配时拒绝连接，不允许某个聊天偷偷改变其他聊天的模型或策略。
+
+Linux/POSIX 使用临时 0700 目录中的 0600 Unix socket，发现文件 `daemon.json` 为 0600，核对当前用户、状态锁 PID、协议与配置指纹。
+不监听 TCP，不保存 Reasonix 握手 token。原有锁由后台持有，活动锁、损坏锁和残留锁均不由客户端删除。
+旧版独占服务还在运行时，共享客户端明确报错，需让旧服务正常退出再切换。
+
+客户端 EOF 或信号只断开自己；任务与审批由后台继续持有。所有客户端断开且没有执行中任务时，后台在约一秒空闲后有界回收自己的 worker、socket 和锁。
+执行中任务保留到结算；待审批任务仍受原审批与提示超时约束，可通过重连处理。
+后台异常退出时客户端收到连接错误，不会自动重发；重新连接后应核对任务状态。
+
+`serve --private-stdio` 保留独占模式，用于隔离诊断与专用生命周期测试，必须使用独立状态目录。
+共享后台当前需要 POSIX socket；Windows 默认共享模式明确拒绝，须使用独占模式和每客户端独立状态目录。macOS 尚未原生验收。
+CLI 的一次性写操作不会绕过后台锁；后台活动时请通过 MCP 工具执行写操作。
 
 ## Studio 接口
 

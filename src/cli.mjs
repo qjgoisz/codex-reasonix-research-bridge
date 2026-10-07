@@ -9,6 +9,7 @@ import { Store, StoreError } from './store.mjs';
 import { SessionMap } from './session-map.mjs';
 import { Bridge, BridgeError } from './orchestration.mjs';
 import { McpServer, serveStdio } from './mcp-server.mjs';
+import { serveSharedClient, runSharedDaemon } from './shared-server.mjs';
 import { installShutdownHandlers } from './shutdown.mjs';
 import { preflightWorker, DEFAULT_REASONIX_HOME, locateReasonix } from './worker.mjs';
 import { CatalogueCache, describeSelector } from './models.mjs';
@@ -22,7 +23,7 @@ const DEFAULT_STATE_ROOT = resolve(process.cwd(), '.bridge-state');
 export const USAGE = `用法：reasonix-bridge <命令> [选项]
 
 命令
-  serve                            以 MCP server 形式在 stdio 上服务（供 Codex 调用）
+  serve                            以 MCP stdio 客户端连接共享后台（供多个 Codex 聊天调用）
   delegate --file <契约.json>       提交任务；--file - 表示从 stdin 读取
   status [--id <任务id>]           查询任务状态
   result --id <任务id>             取回任务结果
@@ -39,6 +40,7 @@ export const USAGE = `用法：reasonix-bridge <命令> [选项]
   unlock [--stale]                 清理残留锁（--stale 用于进程已退出的情况）
 
 选项
+  --private-stdio       独占 stdio 服务，用于隔离诊断；不能共用状态目录
   --backend <studio|acp>  后端类型，默认 studio
   --config <文件>       配置文件（默认 bridge.config.json，缺失则用内置默认值）
   --state-root <目录>   状态目录（默认 ${DEFAULT_STATE_ROOT}）
@@ -64,7 +66,7 @@ export function parseArgs(argv) {
   const flags = {};
   const positional = [];
   const valueFlags = new Set(['backend','config','state-root','reasonix-home','reasonix-root','profile','provider','model-id','model','reasoning','transport','prompt-timeout-ms','worker-command','worker-arg','workspace','id','file','text','verdict','reason','actor','approval-mode','request-timeout-ms']);
-  const booleanFlags = new Set(['wait', 'stale', 'help', 'json', 'refresh', 'expose-model-choice', 'init']);
+  const booleanFlags = new Set(['private-stdio', 'wait', 'stale', 'help', 'json', 'refresh', 'expose-model-choice', 'init']);
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (!token.startsWith('--')) {
@@ -238,6 +240,16 @@ export async function main(argv) {
       route: resolvedRoute(config),
       note: '选择值的真实格式由 REASONIX 决定（provider/model），桥会自行编码；不要手写。',
     }, true);
+    return 0;
+  }
+
+  if (command === '_daemon') {
+    await runSharedDaemon({ common, openBridge });
+    return 0;
+  }
+
+  if (command === 'serve' && !flags['private-stdio']) {
+    await serveSharedClient({ common, argv, input: stdin, output: stdout });
     return 0;
   }
 
