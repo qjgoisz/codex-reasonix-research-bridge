@@ -13,21 +13,29 @@ function fixture(t, env = {}) {
   const state = join(root, 'state'), workspace = join(root, 'work'); mkdirSync(workspace);
   const clients = [];
   t.after(async () => {
+    // Snapshot ownership before EOF: daemon cleanup removes its descriptor and
+    // lock before the process itself exits and releases its Windows cwd handle.
+    const pids = new Set(clients.map(c => c.child.pid).filter(Number.isSafeInteger));
+    for (const file of [join(state, 'bridge.lock'), join(state, 'daemon.json'), join(root, 'fake.json')]) {
+      try {
+        const pid = JSON.parse(readFileSync(file)).pid;
+        if (Number.isSafeInteger(pid) && pid > 0) pids.add(pid);
+      } catch {}
+    }
     for (const c of clients) c.child.stdin.end();
     await until(() => {
       if (!existsSync(join(state, 'bridge.lock'))) return true;
       try { return !alive(JSON.parse(readFileSync(join(state, 'bridge.lock'))).pid); } catch { return false; }
     }, { timeoutMs: 10000 }).catch(() => {});
     // Only this fixture's processes may be force-cleaned after a failed assertion.
-    const pids = clients.map(c => c.child.pid);
-    for (const file of [join(state, 'daemon.json'), join(root, 'fake.json')]) {
-      try { pids.push(JSON.parse(readFileSync(file)).pid); } catch {}
-    }
-    for (const pid of pids.filter(Number.isSafeInteger)) if (alive(pid)) {
+    for (const pid of pids) if (alive(pid)) {
       if (process.platform === 'win32') { try { execFileSync('taskkill.exe', ['/PID',String(pid),'/T','/F'],{windowsHide:true,stdio:'ignore'}); } catch {} }
       else { try { process.kill(pid,'SIGKILL'); } catch {} }
     }
-    rmSync(root, { recursive: true, force: true });
+    // Sending a signal and releasing a lock do not prove process/pipe closure.
+    await until(() => clients.every(c => c.hasClosed()) && [...pids].every(pid => !alive(pid)), { timeoutMs: 5000 });
+    // Windows may briefly retain directory handles even after process exit.
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
   const start = (extras = []) => {
     const child = spawn(process.execPath, [CLI, 'serve', '--backend', 'acp', '--state-root', state,
@@ -36,7 +44,7 @@ function fixture(t, env = {}) {
       '--prompt-timeout-ms', '7000', ...extras], {
       cwd: root, env: {...process.env, FAKE_STATE: join(root, 'fake.json'), ...env}, stdio:['pipe','pipe','pipe'],
     });
-    let buffer = '', stderr = '', sequence = 0;
+    let buffer = '', stderr = '', sequence = 0, hasClosed = false;
     const pending = new Map();
     child.stderr.on('data', chunk => stderr += chunk);
     child.stdout.on('data', chunk => {
@@ -49,6 +57,7 @@ function fixture(t, env = {}) {
       }
     });
     const closed = new Promise(yes => child.once('close', code => {
+      hasClosed = true;
       for (const p of pending.values()) { clearTimeout(p.timer); p.no(new Error(stderr || 'client closed')); }
       pending.clear(); yes(code);
     }));
@@ -61,7 +70,7 @@ function fixture(t, env = {}) {
       assert.ok(!response.error,JSON.stringify(response.error));
       return JSON.parse(response.result.content[0].text);
     };
-    const c={child,rpc,call,closed,stderr:()=>stderr};clients.push(c);return c;
+    const c={child,rpc,call,closed,hasClosed:()=>hasClosed,stderr:()=>stderr};clients.push(c);return c;
   };
   return { root, state, workspace, start };
 }

@@ -17,6 +17,7 @@
  *   FAKE_DELAY_MS   delay before answering a prompt
  *   FAKE_WRITE      file to create when the permission scenario is allowed
  *   FAKE_LOG        append per-frame diagnostics
+ *   FAKE_KEEP_STDOUT_OPEN  1: leave an incomplete response open, forcing a request timeout
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -161,7 +162,8 @@ async function effectThenMangle(sessionId, requestId, mode) {
   // incomplete_frame：写半条 JSON 就关闭 stdout
   raw('{"jsonrpc":"2.0","id":1,"resu');
   await new Promise(resolve => setTimeout(resolve, 20));
-  process.stdout.end();
+  // 不依赖平台是否把 stdout.end() 变成父进程可见的 EOF，也能覆盖半帧超时。
+  if (process.env.FAKE_KEEP_STDOUT_OPEN !== '1') process.stdout.end();
 }
 
 const notify = (sessionId, update) => send({
