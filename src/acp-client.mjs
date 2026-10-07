@@ -192,6 +192,10 @@ export class AcpClient {
         this.#pending.delete(id);
         const code = method === 'session/prompt' ? 'prompt_timeout' : 'request_timeout';
         pending.reject(new AcpError(code, `${method} 超时（${timeoutMs}ms）。`));
+        // 没有响应不代表 worker 已停止；它可能仍在执行，或卡在半个协议帧上。
+        // 先保留本次请求的超时分类与 submitted 快照，再封存连接，禁止继续复用。
+        // 其他在途请求按断连结算；桥只在下一次显式派发时回收并重建客户端。
+        this.#fail('connection_lost', `${method} 超时后连接状态无法确认。`);
       }, timeoutMs);
       this.#pending.set(id, {
 

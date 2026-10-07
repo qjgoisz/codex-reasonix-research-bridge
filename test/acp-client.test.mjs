@@ -221,12 +221,42 @@ suite.test('输入流被污染时立刻失败，不把日志当协议', async ct
 });
 
 suite.test('prompt 超时归类为结果未知，而不是失败', async ctx => {
-  const { client } = start(ctx, { scenario: 'silent', promptTimeoutMs: 300 });
-  await client.initialize();
-  const { sessionId } = await client.newSession({ cwd: ctx.tempDir(), mcpServers: [] });
-  const error = await ctx.rejects(client.prompt({ sessionId, text: '无响应' }), failure => failure.code === 'prompt_timeout');
-  ctx.equal(error.code, 'prompt_timeout');
-  await client.shutdown();
+  const frames = [];
+  const { client } = start(ctx, {
+    scenario: 'silent', promptTimeoutMs: 300,
+    frameObserver: (direction, frame) => { if (direction === 'out') frames.push(frame); },
+  });
+  try {
+    await client.initialize();
+    const { sessionId } = await client.newSession({ cwd: ctx.tempDir(), mcpServers: [] });
+    const error = await ctx.rejects(client.prompt({ sessionId, text: '无响应' }), failure => failure.code === 'prompt_timeout');
+    ctx.equal(error.submitted, true, '超时不能抹掉提示已经提交的事实');
+    ctx.equal(client.failure, 'connection_lost', '超时后不得把连接当作健康连接复用');
+    const written = frames.length;
+    await ctx.rejects(client.prompt({ sessionId, text: '不得再写入旧连接' }), failure => failure.code === 'connection_lost');
+    ctx.equal(frames.length, written, '封存的连接不得再发送提示');
+  } finally {
+    await client.shutdown();
+  }
+});
+
+suite.test('握手超时后不得复用未确认状态的连接', async ctx => {
+  const frames = [];
+  const client = new AcpClient({
+    command: process.execPath, args: ['-e', 'process.stdin.resume()'],
+    requestTimeoutMs: 300,
+    frameObserver: (direction, frame) => { if (direction === 'out') frames.push(frame); },
+  });
+  try {
+    const error = await ctx.rejects(client.initialize(), failure => failure.code === 'request_timeout');
+    ctx.equal(error.submitted, true);
+    ctx.equal(client.failure, 'connection_lost');
+    const written = frames.length;
+    await ctx.rejects(client.initialize(), failure => failure.code === 'connection_lost');
+    ctx.equal(frames.length, written, '握手超时后不得在旧连接重新握手');
+  } finally {
+    await client.shutdown();
+  }
 });
 
 suite.test('worker 中途退出会让在途请求以“结果未知”结束', async ctx => {

@@ -1041,7 +1041,8 @@ suite.test('确证没写上线时，仍然可以说"本次没有执行过"（R1 
   store.unlock();
 });
 
-suite.test('丢弃失败连接时必须终止它的 worker，且 shutdown 要能回收全部（R2）', async ctx => {
+for (const keepStdoutOpen of [false, true])
+suite.test('丢弃失败连接时必须终止它的 worker，且 shutdown 要能回收全部（R2）' + (keepStdoutOpen ? '（半帧无 EOF）' : ''), async ctx => {
   // 复核 R2 的判定依据：第一条任务的 fake 在写文件后结束 stdout（incomplete_frame），
   // 第二条任务建新客户端并成功。Bridge.shutdown() 之后对**第一个** PID 执行 kill(pid,0)
   // 仍然成功（oldClientAlive=true）—— 旧 worker 失去所有权、无人回收。
@@ -1067,14 +1068,19 @@ suite.test('丢弃失败连接时必须终止它的 worker，且 shutdown 要能
       made.push(client);
       return client;
     },
-    worker: { ...testWorker({ FAKE_SCENARIO: 'effect_then_incomplete_frame' }), reasonixHome: join(root, 'reasonix-home'), promptTimeoutMs: 4000 },
+    worker: {
+      ...testWorker({ FAKE_SCENARIO: 'effect_then_incomplete_frame', FAKE_KEEP_STDOUT_OPEN: keepStdoutOpen ? '1' : '0' }),
+      reasonixHome: join(root, 'reasonix-home'), promptTimeoutMs: keepStdoutOpen ? 1000 : 4000,
+    },
   });
 
-  // 第一条：连接会因 incomplete_frame 进入 failure
-  await bridge.delegate(contract({ id: 'r2-a', workspace: root, permissions: { writePaths: [root] } }), { wait: true });
+  // 第一条：有 EOF 时 incomplete_frame；无 EOF 时超时。两者均须封存连接。
+  const first = await bridge.delegate(contract({ id: 'r2-a', workspace: root, permissions: { writePaths: [root] } }), { wait: true });
+  ctx.equal(first.status, 'unknown', '连接异常不能把已提交的任务判为明确失败');
   const firstPid = made[0]?.pid ?? null;
   ctx.assert(made.length >= 1, '至少要创建一个 client');
   ctx.assert(typeof firstPid === 'number', `第一个 client 应当有 pid：${firstPid}`);
+  ctx.assert(made[0].failure, '超时也必须使旧连接不可复用');
 
   // 第二条：换一个能正常完成的场景，触发「丢弃旧连接 → 新建」。
   // 场景切换必须改**环境变量**（fake 每次启动都读它），而不是把 workerOptions 抹掉 ——
@@ -1497,7 +1503,8 @@ suite.test('回复未能提交时会话无法确保时，记明确失败而不�
   }
 });
 
-suite.test('裁定为 retry 之后必须有显式重放入口，且只能重放一次（F10）', async ctx => {
+for (const keepStdoutOpen of [false, true])
+suite.test('裁定为 retry 之后必须有显式重放入口，且只能重放一次（F10）' + (keepStdoutOpen ? '（半帧无 EOF）' : ''), async ctx => {
   // 复核 F10 的判定依据：任务先 unknown，再 resolve(retry, 合法理由)，
   // 再以相同契约与 ID delegate(wait:true) —— 实际返回 queued、idempotent=true、
   // prompts=1、attempts=1，**没有第二次派发**。"由调用方决定是否重发"当时是空话。
@@ -1514,8 +1521,9 @@ suite.test('裁定为 retry 之后必须有显式重放入口，且只能重放�
     sessions: SessionMap.fromStore(store.readSessions()),
     log: entry => logs.push(entry),
     worker: {
-      ...testWorker({ FAKE_SCENARIO: 'effect_then_incomplete_frame', FAKE_STATE: agentState }),
+      ...testWorker({ FAKE_SCENARIO: 'effect_then_incomplete_frame', FAKE_STATE: agentState, FAKE_KEEP_STDOUT_OPEN: keepStdoutOpen ? '1' : '0' }),
       reasonixHome: join(root, 'reasonix-home'),
+      promptTimeoutMs: keepStdoutOpen ? 1000 : 5000,
     },
     createClient: (spec, hooks) => { assertOfflineSpec(spec); return new AcpClient(spec, hooks); },
   });
